@@ -383,6 +383,42 @@
     border-color: rgba(74,222,128,0.15);
   }
 
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── Compose row ── */
+  .compose {
+    width: 100%;
+    max-width: 640px;
+    display: flex;
+    gap: 8px;
+    padding: 12px 4px 0;
+    flex-shrink: 0;
+    z-index: 2;
+  }
+
+  .compose input {
+    flex: 1;
+    font-family: var(--font-body);
+    font-size: 13px;
+    padding: 9px 14px;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    background: var(--c-surface);
+    color: var(--c-text);
+    outline: none;
+    transition: border-color 0.2s, background 0.2s;
+  }
+
+  .compose input::placeholder { color: var(--c-text-dim); }
+  .compose input:focus {
+    border-color: rgba(255,255,255,0.15);
+    background: var(--c-surface-hover);
+  }
+
   .state-indicator {
     display: flex;
     align-items: center;
@@ -420,7 +456,7 @@
     <div class="logo-mark"></div>
     <h1>Parlor</h1>
   </div>
-  <span class="model-label">Gemma 4 E2B</span>
+  <span id="modelLabel" class="model-label" title="">…</span>
   <div id="status" class="status-pill disconnected">Disconnected</div>
 </header>
 
@@ -439,9 +475,18 @@
   <!-- Transcript -->
   <div id="messages" class="transcript"></div>
 
+  <!-- Text compose -->
+  <form id="composeForm" class="compose">
+    <input id="textInput" type="text" autocomplete="off" placeholder="Type a message, or press Enter to describe the camera" />
+    <button type="submit" class="ctrl-btn">Send</button>
+  </form>
+
   <!-- Controls -->
   <div class="controls">
-    <button id="cameraToggle" class="ctrl-btn active">Camera On</button>
+    <div class="ctrl-group">
+      <button id="micToggle" class="ctrl-btn active">Mic On</button>
+      <button id="cameraToggle" class="ctrl-btn active">Camera On</button>
+    </div>
     <div class="state-indicator">
       <div id="stateDot" class="dot loading"></div>
       <span id="stateText">Loading...</span>
@@ -457,7 +502,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-const video = $('video'), cameraToggle = $('cameraToggle');
+const video = $('video'), cameraToggle = $('cameraToggle'), micToggle = $('micToggle');
+const composeForm = $('composeForm'), textInput = $('textInput');
 const messagesDiv = $('messages'), statusEl = $('status');
 const stateDot = $('stateDot'), stateText = $('stateText');
 const viewportWrap = $('viewportWrap');
@@ -466,6 +512,7 @@ const waveformCtx = waveformCanvas.getContext('2d');
 
 let ws, mediaStream, myvad;
 let cameraEnabled = true;
+let micEnabled = true;
 let audioCtx, currentSource;
 let state = 'loading';
 let ignoreIncomingAudio = false;
@@ -825,11 +872,73 @@ cameraToggle.addEventListener('click', () => {
   video.style.opacity = cameraEnabled ? 1 : 0.3;
 });
 
+function applyMicEnabled() {
+  if (!mediaStream) return;
+  for (const track of mediaStream.getAudioTracks()) track.enabled = micEnabled;
+}
+
+micToggle.addEventListener('click', () => {
+  micEnabled = !micEnabled;
+  micToggle.classList.toggle('active', micEnabled);
+  micToggle.textContent = micEnabled ? 'Mic On' : 'Mic Off';
+  applyMicEnabled();
+});
+
+// ── Text submit ──
+const escapeHtml = (s) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function submitText(text) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  text = text.trim();
+  const imageBase64 = captureFrame();
+  if (!text && !imageBase64) return;  // nothing to send
+
+  // Barge-in if assistant is currently speaking; drop if still processing a prior turn.
+  if (state === 'speaking') {
+    stopPlayback();
+    ignoreIncomingAudio = true;
+    ws.send(JSON.stringify({ type: 'interrupt' }));
+  } else if (state === 'processing') {
+    return;
+  }
+
+  const display = text ? escapeHtml(text) : '<em>Describe what the camera sees</em>';
+  const meta = imageBase64 ? 'with camera' : '';
+
+  setState('processing');
+  setStatus('processing', 'Processing');
+  addMessage('user', display, meta);
+
+  const payload = {};
+  if (text) payload.text = text;
+  if (imageBase64) payload.image = imageBase64;
+  ws.send(JSON.stringify(payload));
+}
+
+composeForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  submitText(textInput.value);
+  textInput.value = '';
+});
+
 // ── Init ──
+async function loadConfig() {
+  try {
+    const cfg = await (await fetch('/config')).json();
+    const label = $('modelLabel');
+    label.textContent = cfg.ollama_model;
+    label.title = `LLM: ${cfg.ollama_model} via ${cfg.ollama_host}\nSTT: whisper ${cfg.whisper_model}`;
+  } catch (e) {
+    console.warn('Could not load /config', e);
+    $('modelLabel').textContent = 'unknown';
+  }
+}
+
 async function init() {
   initWaveformCanvas();
   window.addEventListener('resize', initWaveformCanvas);
 
+  loadConfig();
   await startCamera();
   connect();
 
