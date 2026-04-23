@@ -1,5 +1,12 @@
 # Parlor
 
+> **Fork: `tonylchang/parlor`** — remote-hosting changes on top of [fikrikarim/parlor](https://github.com/fikrikarim/parlor):
+> - LLM swapped from on-device Gemma 4 E2B (LiteRT-LM) to **[Ollama](https://ollama.com)** — default `qwen3-vl:8b`, works with any vision-capable Ollama model
+> - Dedicated STT via **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** (replaces Gemma's built-in audio understanding)
+> - Model, STT, and Ollama host are env-configurable: `OLLAMA_HOST`, `OLLAMA_MODEL`, `WHISPER_MODEL`, `WHISPER_LANGUAGE`
+> - Text compose field in the UI alongside voice input
+> - `deploy/Caddyfile` for HTTPS reverse proxy + basic auth when hosting remotely
+
 On-device, real-time multimodal AI. Have natural voice and vision conversations with an AI that runs entirely on your machine.
 
 Parlor uses [Gemma 4 E2B](https://huggingface.co/google/gemma-4-E2B-it) for understanding speech and vision, and [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) for text-to-speech. You talk, show your camera, and it talks back, all locally.
